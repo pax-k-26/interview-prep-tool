@@ -1,0 +1,25 @@
+[project]
+name = "panelpractice"
+version = "0.1.0"
+description = "Local, open-source, voice-first mock panel interview"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "httpx>=0.27",
+  "numpy>=2",
+  "mlx-audio[server]>=0.5.8",
+  "misaki[en]",
+  "num2words",
+  "spacy",
+  "pip",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

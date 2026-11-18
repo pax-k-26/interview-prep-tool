@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel Practice</title>
+<style>
+  :root { --bg:#f7f4ee; --ink:#26302b; --muted:#5d675f; --accent:#2f5d50; --card:#fff; --warn:#a4452c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1d2320; --ink:#eef0ea; --muted:#a7b0a8; --accent:#7cc2ab; --card:#273029; --warn:#e69177; } }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--ink); font:20px/1.5 -apple-system, system-ui, sans-serif }
+  main { max-width:760px; margin:0 auto; padding:32px 20px 80px }
+  h1 { font-size:32px; margin:0 0 4px } h2 { font-size:24px }
+  p.sub { color:var(--muted); margin:0 0 24px }
+  .panel { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin:20px 0 }
+  .tile { background:var(--card); border-radius:14px; padding:14px 16px; border:3px solid transparent }
+  .tile.active { border-color:var(--accent) }
+  .tile b { display:block } .tile span { color:var(--muted); font-size:17px }
+  button { font:inherit; font-weight:600; padding:16px 28px; border-radius:12px; border:0; background:var(--accent); color:#fff; cursor:pointer; margin:6px 8px 6px 0 }
+  button.secondary { background:transparent; color:var(--ink); border:2px solid var(--muted) }
+  button:disabled { opacity:.4; cursor:default }
+  #status { margin:20px 0; padding:14px 18px; border-radius:12px; background:var(--card); font-size:22px }
+  #status.listening { border-left:8px solid var(--accent) }
+  #captions { margin-top:20px } #captions p { margin:10px 0 }
+  #captions .who { font-weight:700 } #captions .me { color:var(--muted) }
+  #debrief { background:var(--card); border-radius:14px; padding:8px 24px 24px; margin-top:24px }
+  #debrief h2 { font-size:22px; margin-top:24px }
+  .hidden { display:none }
+</style>
+</head>
+<body>
+<main>
+  <h1>Panel Practice</h1>
+  <p class="sub" id="sub"></p>
+  <div class="panel" id="panel"></div>
+
+  <div id="intro">
+    <p>Use headphones or keep your speaker volume moderate. Speak naturally and take your time. When you finish an answer, press <b>I'm finished</b>, or just pause for a few seconds.</p>
+    <button id="begin">Begin interview</button>
+  </div>
+
+  <div id="live" class="hidden">
+    <div id="status">Connecting…</div>
+    <button id="finish" disabled>I'm finished</button>
+    <button id="unfinish" class="secondary hidden">I wasn't finished</button>
+    <button id="end" class="secondary">End and get feedback</button>
+    <div id="captions"></div>
+  </div>
+  <div id="debrief" class="hidden"></div>
+</main>
+
+<script>
+const PAUSE_MS = 5000;          // silence after speech that counts as "finished"
+const VOICE_RMS = 0.015;        // mic level treated as speech
+const $ = id => document.getElementById(id);
+let ws, ctx, micNode, recording = false, speechMs = 0, lastVoice = 0, serverTurn = false;
+const queue = []; let playing = false, cur;
+
+const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function md(src) {   // tiny, safe Markdown: headings, bold, bullets, paragraphs
+  return esc(src).split(/\n{2,}|\n(?=[#*-] )/).map(b => {
+    b = b.trim(); if (!b) return '';
+    if (b.startsWith('## ')) return '<h2>' + b.slice(3) + '</h2>';
+    const bold = t => t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+    if (/^[-*] /.test(b)) return '<ul>' + b.split('\n').map(l => '<li>' + bold(l.replace(/^[-*] /, '')) + '</li>').join('') + '</ul>';
+    return '<p>' + bold(b).replace(/\n/g, '<br>') + '</p>';
+  }).join('');
+}
+
+fetch('/api/round').then(r => r.json()).then(r => {
+  $('sub').textContent = `${r.role} · ${r.organization}`;
+  $('panel').innerHTML = r.panel.map(p => `<div class="tile" data-n="${esc(p.name)}"><b>${esc(p.name)}</b><span>${esc(p.title)}</span></div>`).join('');
+});
+
+function status(t, cls = '') { $('status').textContent = t; $('status').className = cls; }
+function highlight(name) { document.querySelectorAll('.tile').forEach(t => t.classList.toggle('active', t.dataset.n === name)); }
+function caption(who, text, me) {
+  const last = $('captions').lastElementChild;
+  if (last && last.dataset.who === who && !me) { last.append(' ' + text); return; }   // sentences of one turn share a paragraph
+  const p = document.createElement('p'); p.className = me ? 'me' : ''; p.dataset.who = who;
+  p.innerHTML = `<span class="who">${esc(who)}:</span> `; p.append(text); $('captions').appendChild(p); p.scrollIntoView({block:'nearest'});
+}
+
+async function setupMic() {
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  await ctx.resume();
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+  const code = `class P extends AudioWorkletProcessor {
+    constructor(){ super(); this.b=[]; this.pos=0; }
+    process(inp){ const x=inp[0][0]; if(!x) return true;
+      const step=sampleRate/16000; let rms=0; const out=[];
+      for(let i=0;i<x.length;i++) rms+=x[i]*x[i];
+      for(;this.pos<x.length;this.pos+=step) out.push(Math.max(-1,Math.min(1,x[Math.floor(this.pos)]))*32767);
+      this.pos-=x.length;
+      this.port.postMessage({pcm:Int16Array.from(out), rms:Math.sqrt(rms/x.length), ms:x.length/sampleRate*1000}); return true; } }
+    registerProcessor('p', P);`;
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], {type:'application/javascript'})));
+  micNode = new AudioWorkletNode(ctx, 'p');
+  ctx.createMediaStreamSource(stream).connect(micNode);
+  micNode.port.onmessage = ({data}) => {
+    if (!recording) return;
+    if (ws.readyState === 1) ws.send(data.pcm.buffer);
+    const now = performance.now();
+    if (data.rms > VOICE_RMS) { speechMs += data.ms; lastVoice = now; }
+    else if (speechMs > 1500 && now - lastVoice > PAUSE_MS) finish();
+  };
+}
+
+function startRecording() {
+  recording = true; speechMs = 0; lastVoice = performance.now();
+  status('Listening. Take your time.', 'listening'); highlight(null);
+  $('finish').disabled = false; $('unfinish').classList.add('hidden');
+}
+function finish() {
+  if (!recording) return; recording = false; $('finish').disabled = true;
+  ws.send(JSON.stringify({type:'finish'})); $('unfinish').classList.remove('hidden'); status('The panel is considering your answer…');
+}
+
+async function pump() {
+  if (playing) return; playing = true;
+  while (queue.length) {
+    const {buf, who} = queue.shift(); highlight(who); status(`${who} is speaking…`);
+    const src = cur = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination);
+    await new Promise(res => { src.onended = res; src.start(); });
+  }
+  playing = false; highlight(null); maybeListen();
+}
+function maybeListen() { if (serverTurn && !playing && !queue.length) { serverTurn = false; startRecording(); } }
+
+let nextSpeaker = null;
+function onMessage(e) {
+  if (typeof e.data !== 'string') {
+    const who = nextSpeaker;
+    ctx.decodeAudioData(e.data.slice ? e.data.slice(0) : e.data).then(buf => { queue.push({buf, who}); pump(); });
+    return;
+  }
+  const m = JSON.parse(e.data);
+  if (m.type === 'caption') { nextSpeaker = m.speaker; caption(m.speaker, m.text); }
+  else if (m.type === 'transcript') caption('You', m.text || '(nothing heard)', true);
+  else if (m.type === 'state') {
+    if (m.state === 'thinking') status('The panel is considering your answer…');
+    if (m.state === 'your_turn') { serverTurn = true; maybeListen(); }
+    if (m.state === 'debriefing') { recording = false; status('Preparing your feedback. This can take a minute…'); }
+  } else if (m.type === 'debrief') {
+    status('Interview complete.'); $('finish').classList.add('hidden'); $('unfinish').classList.add('hidden'); $('end').classList.add('hidden');
+    $('debrief').innerHTML = md(m.markdown); $('debrief').classList.remove('hidden');
+  }
+}
+
+$('begin').onclick = async () => {
+  $('intro').classList.add('hidden'); $('live').classList.remove('hidden'); status('Connecting…');
+  try { await setupMic(); } catch (e) { status('The microphone is blocked. Allow it in Safari settings for this site, then reload.'); return; }
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  ws.binaryType = 'arraybuffer'; ws.onmessage = onMessage;
+  ws.onopen = () => { status('The panel is joining…'); ws.send(JSON.stringify({type:'start'})); };
+  ws.onclose = () => { if ($('debrief').classList.contains('hidden')) status('Connection lost. Reload the page to start again.'); };
+};
+$('finish').onclick = finish;
+const hush = () => { queue.length = 0; serverTurn = false; try { cur && cur.stop(); } catch {} };
+$('unfinish').onclick = () => { hush(); ws.send(JSON.stringify({type:'continue'})); };
+$('end').onclick = () => { recording = false; hush(); ws.send(JSON.stringify({type:'end'})); };
+</script>
+</body>
+</html>

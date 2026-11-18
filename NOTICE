@@ -1,0 +1,8 @@
+Panel Practice
+Copyright 2026 Paxton Kelley and contributors. Licensed under the Apache License, Version 2.0.
+
+Third-party models and software used at runtime (not distributed in this repository):
+- Kokoro-82M text-to-speech, Apache-2.0 (hexgrad/Kokoro-82M).
+- NVIDIA Parakeet TDT 0.6B v2 speech recognition, CC-BY-4.0. "Parakeet" is by NVIDIA; the MLX conversion is by mlx-community.
+- mlx-audio (MIT), llama.cpp (MIT), FastAPI (MIT), httpx (BSD-3).
+- Default language model: gpt-oss-20b, Apache-2.0 with the OpenAI gpt-oss usage policy. Any OpenAI-compatible model may be substituted.

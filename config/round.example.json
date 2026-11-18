@@ -1,0 +1,12 @@
+{
+  "role": "Vice President, Clinical Operations",
+  "organization": "Riverside Regional Health",
+  "minutes": 20,
+  "panel": [
+    {"name": "Dana Whitfield", "title": "Chief Executive Officer", "chair": true, "voice": "af_sarah", "focus": "strategy, leadership style, culture fit"},
+    {"name": "Marcus Hale", "title": "Chief Financial Officer", "voice": "am_michael", "focus": "margins, budget accountability, capital decisions"},
+    {"name": "Dr. Priya Raman", "title": "Chief Medical Officer", "voice": "bf_emma", "focus": "quality, physician alignment, patient safety"}
+  ],
+  "resume": "Twelve years in hospital operations. Currently Senior Director of Perioperative Services at a 400-bed community hospital: led a 180-person team, reduced OR turnover time from 42 to 31 minutes, and closed a 3.1 million dollar annual budget gap through supply contract renegotiation and block-schedule redesign. Previously Director of Patient Access, where she cut registration errors by a third. MBA in healthcare administration. Led a successful Joint Commission survey.",
+  "job_description": "The Vice President of Clinical Operations oversees surgical services, emergency, inpatient nursing, and ancillary departments across two hospitals. Responsibilities: operating margin accountability, physician partnership, workforce stability, quality and patient safety outcomes, and execution of the system's three-year strategic plan."
+}
